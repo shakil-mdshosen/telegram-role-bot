@@ -1,7 +1,8 @@
 import os
 import json
 import requests
-from telegram import Update, ParseMode
+import base64
+from telegram import Update, ParseMode, BotCommand
 from telegram.ext import Updater, CommandHandler, CallbackContext
 
 ROLES_FILE = "roles.json"
@@ -39,8 +40,6 @@ def update_github_file():
         print(f"Failed to get file SHA from GitHub: {r.status_code} {r.text}")
         sha = None  # for new file create
 
-    # Prepare content base64
-    import base64
     content = json.dumps(roles, indent=2)
     content_bytes = content.encode('utf-8')
     content_b64 = base64.b64encode(content_bytes).decode('utf-8')
@@ -57,7 +56,7 @@ def update_github_file():
         data["sha"] = sha
 
     r2 = requests.put(url_put, headers=headers, json=data)
-    if r2.status_code in [200,201]:
+    if r2.status_code in [200, 201]:
         print("Successfully updated roles.json on GitHub.")
     else:
         print(f"Failed to update GitHub file: {r2.status_code} {r2.text}")
@@ -82,11 +81,23 @@ def is_admin(update: Update):
     member = chat.get_member(user_id)
     return member.status in ['administrator', 'creator']
 
+def send_role_suggestions(update: Update, context: CallbackContext):
+    chat_id = str(update.message.chat_id)
+    if chat_id in roles and roles[chat_id]:
+        available_roles = ", ".join(f"`{r}`" for r in roles[chat_id].keys())
+        update.message.reply_text(
+            f"💡 Available roles in this group:\n{available_roles}\n\n"
+            "Use roles exactly as shown when typing the command."
+        )
+    else:
+        update.message.reply_text("ℹ️ No roles defined yet in this group.")
+
 def setrole(update: Update, context: CallbackContext):
     if not is_admin(update):
         return update.message.reply_text("❌ Only admins can assign roles.")
 
     if len(context.args) < 2:
+        send_role_suggestions(update, context)
         return update.message.reply_text("Usage: /setrole @user1 @user2 role")
 
     *usernames, role = context.args
@@ -117,6 +128,7 @@ def setrole(update: Update, context: CallbackContext):
 
 def mention(update: Update, context: CallbackContext):
     if len(context.args) < 1:
+        send_role_suggestions(update, context)
         return update.message.reply_text("Usage: /mention role")
 
     role = context.args[0].lower()
@@ -145,6 +157,7 @@ def removerole(update: Update, context: CallbackContext):
         return update.message.reply_text("❌ Only admins can remove users from roles.")
 
     if len(context.args) < 2:
+        send_role_suggestions(update, context)
         return update.message.reply_text("Usage: /removerole @user1 @user2 role")
 
     *usernames, role = context.args
@@ -179,6 +192,7 @@ def deleterole(update: Update, context: CallbackContext):
         return update.message.reply_text("❌ Only admins can delete roles.")
 
     if len(context.args) < 1:
+        send_role_suggestions(update, context)
         return update.message.reply_text("Usage: /deleterole role")
 
     role = context.args[0].lower()
@@ -201,6 +215,17 @@ def main():
     updater = Updater(TOKEN, use_context=True)
     dp = updater.dispatcher
 
+    # Set bot commands with descriptions (autocomplete popup in Telegram clients)
+    bot_commands = [
+        BotCommand("start", "Start the bot and show commands"),
+        BotCommand("setrole", "Assign role to users: /setrole @user1 @user2 role"),
+        BotCommand("removerole", "Remove users from a role: /removerole @user1 role"),
+        BotCommand("mention", "Mention users by role: /mention role"),
+        BotCommand("roles", "Show all roles in this group"),
+        BotCommand("deleterole", "Delete a role from the group"),
+    ]
+    updater.bot.set_my_commands(bot_commands)
+
     dp.add_handler(CommandHandler("start", start))
     dp.add_handler(CommandHandler("setrole", setrole))
     dp.add_handler(CommandHandler("mention", mention))
@@ -208,6 +233,7 @@ def main():
     dp.add_handler(CommandHandler("removerole", removerole))
     dp.add_handler(CommandHandler("deleterole", deleterole))
 
+    print("Bot started...")
     updater.start_polling()
     updater.idle()
 
