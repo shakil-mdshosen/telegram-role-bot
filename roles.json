@@ -3,6 +3,9 @@
     "test": [
       "captainsharkhello",
       "MentioProBot"
+    ],
+    "adp": [
+      "captainsharkhello"
     ]
   }
 }
